@@ -1,5 +1,5 @@
-import { motion, AnimatePresence } from "framer-motion";
-import { Check, Flame, MoreHorizontal } from "lucide-react";
+import { motion } from "framer-motion";
+import { Flame, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { Habit } from "@workspace/api-client-react/src/generated/api.schemas";
 import { cn, HABIT_COLORS } from "@/lib/utils";
 import { 
@@ -8,7 +8,6 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
 
 interface HabitCardProps {
   habit: Habit;
@@ -19,100 +18,90 @@ interface HabitCardProps {
 }
 
 export function HabitCard({ habit, isCompleted, onToggle, onEdit, onDelete }: HabitCardProps) {
-  // Find color classes or fallback to indigo
   const colorObj = HABIT_COLORS.find(c => c.name === habit.color) || HABIT_COLORS[0];
   const colorClasses = colorObj.value.split(' ');
-  const bgClass = colorClasses[2]; // e.g. bg-indigo-500/10
-  const textClass = colorClasses[1]; // e.g. text-indigo-500
-  const solidBgClass = colorClasses[0]; // e.g. bg-indigo-500
+  const solidBgClass = colorClasses[0];
+  const bgLightClass = colorClasses[2];
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      whileHover={{ scale: 1.01 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.2 }}
       className={cn(
-        "group relative p-5 rounded-3xl transition-all duration-300 glass-card flex items-center justify-between gap-4 overflow-hidden",
-        isCompleted ? "opacity-75" : "hover:shadow-xl"
+        "group relative flex items-center gap-4 p-4 rounded-2xl border transition-all duration-200",
+        isCompleted
+          ? "bg-card/60 border-border/50 opacity-70"
+          : "bg-card border-border hover:border-border/80 hover:shadow-sm"
       )}
     >
-      {/* Background Completion Fill Animation */}
-      <AnimatePresence>
-        {isCompleted && (
-          <motion.div
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            transition={{ duration: 0.4, ease: "easeOut" }}
-            className={cn("absolute inset-0 origin-right opacity-[0.03]", solidBgClass)}
-          />
-        )}
-      </AnimatePresence>
+      {/* Icon */}
+      <div className={cn(
+        "w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0 transition-all duration-200",
+        bgLightClass,
+        isCompleted && "grayscale opacity-60"
+      )}>
+        {habit.icon}
+      </div>
 
-      <div className="flex items-center gap-4 relative z-10 flex-1 min-w-0">
-        <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-colors", bgClass)}>
-          {habit.icon}
-        </div>
-        
-        <div className="flex flex-col min-w-0 flex-1">
-          <h3 className={cn(
-            "font-display font-semibold text-lg truncate transition-all",
-            isCompleted ? "text-muted-foreground line-through decoration-2 decoration-muted-foreground/30" : "text-foreground"
-          )}>
-            {habit.name}
-          </h3>
-          
-          <div className="flex items-center gap-3 mt-1">
-            <div className="flex items-center gap-1 text-xs font-medium text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded-full">
-              <Flame size={12} fill="currentColor" />
-              <span>{habit.streak}</span>
-            </div>
-            
-            {habit.targetCount > 1 && (
-              <div className="text-xs font-medium text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
-                Meta: {habit.targetCount}
-              </div>
-            )}
-          </div>
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <p className={cn(
+          "font-semibold text-base truncate transition-all duration-200",
+          isCompleted ? "line-through text-muted-foreground" : "text-foreground"
+        )}>
+          {habit.name}
+        </p>
+        <div className="flex items-center gap-2 mt-0.5">
+          {habit.streak > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-500">
+              <Flame size={11} fill="currentColor" />
+              {habit.streak} dias
+            </span>
+          )}
+          {habit.streak > 0 && habit.totalCompletions > 0 && (
+            <span className="text-muted-foreground/40 text-xs">·</span>
+          )}
+          {habit.totalCompletions > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {habit.totalCompletions} no total
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2 relative z-10">
+      {/* Actions */}
+      <div className="flex items-center gap-2 shrink-0">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity md:flex hidden">
-              <MoreHorizontal size={18} />
-            </Button>
+            <button className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-all opacity-0 group-hover:opacity-100 focus:opacity-100">
+              <MoreVertical size={16} />
+            </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="rounded-2xl">
-            <DropdownMenuItem onClick={onEdit} className="rounded-xl cursor-pointer">Editar</DropdownMenuItem>
-            <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive rounded-xl cursor-pointer">Excluir</DropdownMenuItem>
+          <DropdownMenuContent align="end" className="rounded-xl min-w-[140px]">
+            <DropdownMenuItem onClick={onEdit} className="rounded-lg gap-2 cursor-pointer text-sm">
+              <Pencil size={14} /> Editar
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onDelete} className="rounded-lg gap-2 cursor-pointer text-destructive focus:text-destructive text-sm">
+              <Trash2 size={14} /> Excluir
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Check button — plain CSS, no AnimatePresence to avoid removeChild bug */}
         <button
           onClick={onToggle}
+          aria-label={isCompleted ? "Desmarcar hábito" : "Marcar como concluído"}
           className={cn(
-            "w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 shrink-0 border-2",
-            isCompleted 
-              ? cn(solidBgClass, "border-transparent text-white shadow-md", `shadow-${habit.color.toLowerCase()}-500/30`)
-              : "border-border hover:border-primary/50 text-transparent hover:bg-secondary"
+            "w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 border-2 font-bold text-lg",
+            isCompleted
+              ? cn(solidBgClass, "border-transparent text-white scale-95")
+              : "border-border hover:border-primary/50 hover:bg-primary/5 text-transparent"
           )}
         >
-          <AnimatePresence>
-            {isCompleted && (
-              <motion.div
-                initial={{ scale: 0, rotate: -45 }}
-                animate={{ scale: 1, rotate: 0 }}
-                exit={{ scale: 0, rotate: 45 }}
-                transition={{ type: "spring", stiffness: 500, damping: 25 }}
-              >
-                <Check size={24} strokeWidth={3} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          ✓
         </button>
       </div>
     </motion.div>
