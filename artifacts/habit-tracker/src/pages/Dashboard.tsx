@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { HabitCard } from "@/components/HabitCard";
 import { HabitFormDialog } from "@/components/HabitFormDialog";
 import { useHabitsData } from "@/hooks/use-habits-data";
+import { useReminders, requestNotificationPermission } from "@/hooks/use-reminders";
 import { Habit } from "@workspace/api-client-react/src/generated/api.schemas";
 
 function getGreeting() {
@@ -56,6 +57,8 @@ export default function Dashboard() {
     isUpdating,
   } = useHabitsData(currentDate);
 
+  useReminders(habits);
+
   const formattedDate = format(currentDate, "EEEE, d 'de' MMMM", { locale: ptBR });
   const capitalizedDate = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
   const progress = habits.length > 0
@@ -64,8 +67,12 @@ export default function Dashboard() {
 
   const handleOpenEdit = (habit: Habit) => { setEditingHabit(habit); setIsDialogOpen(true); };
   const handleOpenCreate = () => { setEditingHabit(null); setIsDialogOpen(true); };
-  const handleSubmit = (data: any) => {
+  const handleSubmit = async (data: any) => {
     setIsDialogOpen(false);
+    // If a reminder was set, ask for notification permission
+    if (data.reminderTime) {
+      await requestNotificationPermission();
+    }
     if (editingHabit) {
       updateHabit({ id: editingHabit.id, data });
     } else {

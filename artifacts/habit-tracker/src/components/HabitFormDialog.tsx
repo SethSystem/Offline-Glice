@@ -20,6 +20,7 @@ export function HabitFormDialog({ isOpen, onClose, onSubmit, initialData, isLoad
   const [color, setColor] = useState("Indigo");
   const [frequency, setFrequency] = useState<HabitFrequency>("daily");
   const [targetCount, setTargetCount] = useState("1");
+  const [reminderTime, setReminderTime] = useState("");
 
   useEffect(() => {
     if (isOpen) {
@@ -29,12 +30,14 @@ export function HabitFormDialog({ isOpen, onClose, onSubmit, initialData, isLoad
         setColor(initialData.color);
         setFrequency(initialData.frequency);
         setTargetCount(initialData.targetCount.toString());
+        setReminderTime(initialData.reminderTime ?? "");
       } else {
         setName("");
         setIcon("💧");
         setColor("Indigo");
         setFrequency("daily");
         setTargetCount("1");
+        setReminderTime("");
       }
     }
   }, [isOpen, initialData]);
@@ -48,6 +51,7 @@ export function HabitFormDialog({ isOpen, onClose, onSubmit, initialData, isLoad
       color,
       frequency,
       targetCount: parseInt(targetCount, 10) || 1,
+      reminderTime: reminderTime || null,
     });
   };
 
@@ -149,6 +153,42 @@ export function HabitFormDialog({ isOpen, onClose, onSubmit, initialData, isLoad
                   className="h-11 rounded-xl bg-secondary/50 border-transparent text-sm"
                 />
               </div>
+            </div>
+
+            {/* Reminder */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Lembrete
+              </Label>
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                  </span>
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={e => setReminderTime(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-secondary/50 border border-transparent pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-foreground [color-scheme:light] dark:[color-scheme:dark]"
+                  />
+                </div>
+                {reminderTime && (
+                  <button
+                    type="button"
+                    onClick={() => setReminderTime("")}
+                    className="h-11 px-3 rounded-xl text-xs text-muted-foreground bg-secondary/50 hover:bg-secondary transition-colors"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground ml-1">
+                {reminderTime
+                  ? `Você será notificado todos os dias às ${reminderTime}`
+                  : "Opcional — deixe vazio para sem lembrete"}
+              </p>
             </div>
 
           </div>

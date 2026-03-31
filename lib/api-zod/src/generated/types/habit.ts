@@ -16,6 +16,7 @@ export interface Habit {
   frequency: HabitFrequency;
   customDays?: number[] | null;
   targetCount: number;
+  reminderTime?: string | null;
   streak: number;
   longestStreak: number;
   totalCompletions: number;

@@ -15,4 +15,5 @@ export interface UpdateHabitRequest {
   frequency?: UpdateHabitRequestFrequency;
   customDays?: number[] | null;
   targetCount?: number;
+  reminderTime?: string | null;
 }

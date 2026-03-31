@@ -15,4 +15,5 @@ export interface CreateHabitRequest {
   frequency: CreateHabitRequestFrequency;
   customDays?: number[] | null;
   targetCount: number;
+  reminderTime?: string | null;
 }

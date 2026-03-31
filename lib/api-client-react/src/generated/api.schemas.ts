@@ -28,6 +28,7 @@ export interface Habit {
   frequency: HabitFrequency;
   customDays?: number[] | null;
   targetCount: number;
+  reminderTime?: string | null;
   streak: number;
   longestStreak: number;
   totalCompletions: number;
@@ -52,6 +53,7 @@ export interface CreateHabitRequest {
   frequency: CreateHabitRequestFrequency;
   customDays?: number[] | null;
   targetCount: number;
+  reminderTime?: string | null;
 }
 
 export type UpdateHabitRequestFrequency =
@@ -72,6 +74,7 @@ export interface UpdateHabitRequest {
   frequency?: UpdateHabitRequestFrequency;
   customDays?: number[] | null;
   targetCount?: number;
+  reminderTime?: string | null;
 }
 
 export interface HabitCompletion {

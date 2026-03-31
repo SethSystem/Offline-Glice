@@ -26,6 +26,7 @@ export const ListHabitsResponseItem = zod.object({
   frequency: zod.enum(["daily", "weekdays", "weekends", "custom"]),
   customDays: zod.array(zod.number()).nullish(),
   targetCount: zod.number(),
+  reminderTime: zod.string().nullish(),
   streak: zod.number(),
   longestStreak: zod.number(),
   totalCompletions: zod.number(),
@@ -44,6 +45,7 @@ export const CreateHabitBody = zod.object({
   frequency: zod.enum(["daily", "weekdays", "weekends", "custom"]),
   customDays: zod.array(zod.number()).nullish(),
   targetCount: zod.number(),
+  reminderTime: zod.string().nullish(),
 });
 
 /**
@@ -61,6 +63,7 @@ export const UpdateHabitBody = zod.object({
   frequency: zod.enum(["daily", "weekdays", "weekends", "custom"]).optional(),
   customDays: zod.array(zod.number()).nullish(),
   targetCount: zod.number().optional(),
+  reminderTime: zod.string().nullish(),
 });
 
 export const UpdateHabitResponse = zod.object({
@@ -72,6 +75,7 @@ export const UpdateHabitResponse = zod.object({
   frequency: zod.enum(["daily", "weekdays", "weekends", "custom"]),
   customDays: zod.array(zod.number()).nullish(),
   targetCount: zod.number(),
+  reminderTime: zod.string().nullish(),
   streak: zod.number(),
   longestStreak: zod.number(),
   totalCompletions: zod.number(),

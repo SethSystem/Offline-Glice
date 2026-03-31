@@ -11,6 +11,7 @@ export const habitsTable = pgTable("habits", {
   frequency: text("frequency").notNull().default("daily"),
   customDays: text("custom_days"),
   targetCount: integer("target_count").notNull().default(1),
+  reminderTime: text("reminder_time"),
   streak: integer("streak").notNull().default(0),
   longestStreak: integer("longest_streak").notNull().default(0),
   totalCompletions: integer("total_completions").notNull().default(0),
