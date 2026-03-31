@@ -1,10 +1,26 @@
 import { AppLayout } from "@/components/AppLayout";
 import { useEffect, useState } from "react";
+import { requestNotificationPermission, getNotificationPermission } from "@/hooks/use-reminders";
 
 export default function SettingsPage() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [installed, setInstalled] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<string>(() => getNotificationPermission());
+
+  const handleRequestNotif = async () => {
+    const granted = await requestNotificationPermission();
+    setNotifPermission(granted ? "granted" : "denied");
+    if (granted) {
+      // Send a test notification immediately
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification("🔔 HabitFlow", {
+        body: "Lembretes ativados! Você vai receber alertas nos horários configurados.",
+        icon: "/favicon.svg",
+        tag: "test-notification",
+      });
+    }
+  };
 
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
@@ -120,6 +136,56 @@ export default function SettingsPage() {
                 </button>
               }
             />
+          </section>
+
+          {/* Notificações */}
+          <section className="bg-card border border-border rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-secondary/30">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Lembretes</p>
+            </div>
+            <SettingRow
+              icon={
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+              }
+              title="Notificações"
+              description={
+                notifPermission === "granted"
+                  ? "Ativadas — você vai receber alertas nos horários configurados"
+                  : notifPermission === "denied"
+                  ? "Bloqueadas — ative nas configurações do celular"
+                  : "Permita notificações para receber lembretes"
+              }
+              action={
+                notifPermission === "granted" ? (
+                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-500/10 px-3 py-1.5 rounded-lg">✓ Ativas</span>
+                ) : notifPermission === "denied" ? (
+                  <span className="text-xs font-semibold text-red-500 bg-red-500/10 px-3 py-1.5 rounded-lg">Bloqueadas</span>
+                ) : (
+                  <button
+                    onClick={handleRequestNotif}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                  >
+                    Ativar
+                  </button>
+                )
+              }
+            />
+            {notifPermission === "granted" && (
+              <div className="px-4 py-3 border-t border-border/50 bg-secondary/10">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium">Importante:</span> os lembretes funcionam enquanto o app estiver aberto ou em segundo plano. Configure os horários ao criar ou editar cada hábito.
+                </p>
+              </div>
+            )}
+            {notifPermission === "denied" && (
+              <div className="px-4 py-3 border-t border-border/50 bg-red-500/5">
+                <p className="text-xs text-muted-foreground">
+                  Vá em <span className="font-medium">Configurações do celular → Apps → Chrome (ou HabitFlow) → Notificações</span> e ative as permissões.
+                </p>
+              </div>
+            )}
           </section>
 
           {/* Sobre */}
