@@ -1,3 +1,4 @@
 {
-  "buildCommand": "pnpm install && pnpm run build"
+  "buildCommand": "cd artifacts/habit-tracker && pnpm install && pnpm build",
+  "outputDirectory": "artifacts/habit-tracker/dist"
 }
