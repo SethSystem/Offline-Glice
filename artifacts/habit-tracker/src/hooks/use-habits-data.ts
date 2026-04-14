@@ -1,9 +1,37 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+
+import {
+  useListHabits,
+  useListCompletions,
+  useCreateHabit,
+  useUpdateHabit,
+  useDeleteHabit,
+  useCompleteHabit,
+  useUncompleteHabit,
+  useGetStats,
+} from "@workspace/api-client-react";
+
+import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+import { offlineStore } from "@/lib/offline-storage";
+
+import {
+  Habit,
+  HabitCompletion,
+  CreateHabitRequest,
+  UpdateHabitRequest,
+} from "@workspace/api-client-react/src/generated/api.schemas";
+
 export function useHabitsData(date: Date = new Date()) {
-  const queryClient = useQueryClient();
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
   const dateStr = format(date, "yyyy-MM-dd");
 
+  // ─────────────────────────────────────────
+  // LOCAL SOURCE OF TRUTH (ÚNICO ESTADO REAL)
+  // ─────────────────────────────────────────
   const [localHabits, setLocalHabits] = useState<Habit[]>(() =>
     offlineStore.loadHabits()
   );
@@ -12,17 +40,26 @@ export function useHabitsData(date: Date = new Date()) {
     offlineStore.loadCompletions(dateStr)
   );
 
+  // ─────────────────────────────────────────
+  // SERVER (APENAS SINCRONIZAÇÃO)
+  // ─────────────────────────────────────────
   const habitsQuery = useListHabits({ query: { enabled: isOnline } });
   const completionsQuery = useListCompletions(
     { from: dateStr, to: dateStr },
     { query: { enabled: isOnline } }
   );
 
-  // sync server → local
+  // ─────────────────────────────────────────
+  // SYNC SERVER → LOCAL (SEM SOBRESCREVER LOCAL)
+  // ─────────────────────────────────────────
   useEffect(() => {
     if (habitsQuery.data) {
       offlineStore.saveHabits(habitsQuery.data);
-      setLocalHabits(habitsQuery.data);
+
+      const local = offlineStore.loadHabits();
+      if (local.length === 0) {
+        setLocalHabits(habitsQuery.data);
+      }
     }
   }, [habitsQuery.data]);
 
@@ -33,7 +70,18 @@ export function useHabitsData(date: Date = new Date()) {
     }
   }, [completionsQuery.data, dateStr]);
 
-  // 🔥 CREATE FIX PRINCIPAL
+  // ─────────────────────────────────────────
+  // MUTATIONS
+  // ─────────────────────────────────────────
+  const createMut = useCreateHabit();
+  const updateMut = useUpdateHabit();
+  const deleteMut = useDeleteHabit();
+  const completeMut = useCompleteHabit();
+  const uncompleteMut = useUncompleteHabit();
+
+  // ─────────────────────────────────────────
+  // CREATE (OFFLINE-FIRST CORRETO)
+  // ─────────────────────────────────────────
   const createHabit = useCallback((payload: CreateHabitRequest) => {
     const tempHabit: Habit = {
       id: Date.now(),
@@ -47,26 +95,32 @@ export function useHabitsData(date: Date = new Date()) {
       createdAt: new Date().toISOString(),
     };
 
-    // 🔥 SEMPRE atualiza UI primeiro (isso resolve seu bug)
+    const updated = [...offlineStore.loadHabits(), tempHabit];
+
     offlineStore.addHabitLocally(tempHabit);
-    setLocalHabits(offlineStore.loadHabits());
+    setLocalHabits(updated);
 
     if (isOnline) {
-      // tenta salvar no servidor, mas NÃO bloqueia UI
       createMut.mutate({ data: payload });
     } else {
       offlineStore.enqueue({ type: "create", payload });
       toast({
         title: "Hábito salvo localmente",
-        description: "Será sincronizado quando voltar online.",
+        description: "Sincroniza quando voltar online",
       });
     }
   }, [isOnline]);
 
-  // DELETE FIX
+  // ─────────────────────────────────────────
+  // DELETE
+  // ─────────────────────────────────────────
   const deleteHabit = useCallback(({ id }: { id: number }) => {
+    const updated = offlineStore
+      .loadHabits()
+      .filter((h) => h.id !== id);
+
     offlineStore.removeHabitLocally(id);
-    setLocalHabits(offlineStore.loadHabits());
+    setLocalHabits(updated);
 
     if (isOnline) {
       deleteMut.mutate({ id });
@@ -75,9 +129,11 @@ export function useHabitsData(date: Date = new Date()) {
     }
   }, [isOnline]);
 
-  // UPDATE FIX
-  const updateHabit = useCallback(({ id, data }: any) => {
-    offlineStore.updateHabitLocally(id, data);
+  // ─────────────────────────────────────────
+  // UPDATE
+  // ─────────────────────────────────────────
+  const updateHabit = useCallback(({ id, data }: { id: number; data: UpdateHabitRequest }) => {
+    offlineStore.updateHabitLocally(id, data as any);
     setLocalHabits(offlineStore.loadHabits());
 
     if (isOnline) {
@@ -87,26 +143,36 @@ export function useHabitsData(date: Date = new Date()) {
     }
   }, [isOnline]);
 
-  // TOGGLE FIX
-  const toggleCompletion = useCallback((habitId: number, isCompleted: boolean) => {
-    if (isCompleted) {
-      offlineStore.removeCompletionLocally(dateStr, habitId);
-    } else {
-      offlineStore.addCompletionLocally(dateStr, habitId);
-    }
-
-    setLocalCompletions(offlineStore.loadCompletions(dateStr));
-
-    if (isOnline) {
+  // ─────────────────────────────────────────
+  // TOGGLE COMPLETION
+  // ─────────────────────────────────────────
+  const toggleCompletion = useCallback(
+    (habitId: number, isCompleted: boolean) => {
       if (isCompleted) {
-        uncompleteMut.mutate({ id: habitId, data: { date: dateStr } });
+        offlineStore.removeCompletionLocally(dateStr, habitId);
       } else {
-        completeMut.mutate({ id: habitId, data: { date: dateStr } });
+        offlineStore.addCompletionLocally(dateStr, habitId);
       }
-    }
-  }, [isOnline, dateStr]);
 
-  const completedHabitIds = new Set(localCompletions.map(c => c.habitId));
+      setLocalCompletions(offlineStore.loadCompletions(dateStr));
+
+      if (isOnline) {
+        if (isCompleted) {
+          uncompleteMut.mutate({ id: habitId, data: { date: dateStr } });
+        } else {
+          completeMut.mutate({ id: habitId, data: { date: dateStr } });
+        }
+      }
+    },
+    [isOnline, dateStr]
+  );
+
+  // ─────────────────────────────────────────
+  // DERIVED STATE
+  // ─────────────────────────────────────────
+  const completedHabitIds = new Set(
+    localCompletions.map((c) => c.habitId)
+  );
 
   return {
     habits: localHabits,
@@ -119,4 +185,8 @@ export function useHabitsData(date: Date = new Date()) {
     isCreating: createMut.isPending,
     isUpdating: updateMut.isPending,
   };
+}
+
+export function useHabitStats() {
+  return useGetStats();
 }
