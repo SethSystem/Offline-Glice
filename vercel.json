@@ -1,4 +1,1 @@
-{
-  "buildCommand": "pnpm install && pnpm build",
-  "outputDirectory": "dist"
-}
+{}
