@@ -1,7 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { Habit } from "@workspace/api-client-react/src/generated/api.schemas";
 
-// Track which reminders already fired today to avoid duplicates
 const FIRED_KEY = "hf:reminders:fired";
 
 function getTodayFired(): Set<string> {
@@ -18,52 +17,94 @@ function markFired(habitId: number) {
   try {
     const today = new Date().toISOString().split("T")[0];
     const stored = JSON.parse(localStorage.getItem(FIRED_KEY) || "{}");
-    // Keep only today's entries to avoid growing forever
     const updated = { [today]: [...(stored[today] || []), String(habitId)] };
     localStorage.setItem(FIRED_KEY, JSON.stringify(updated));
   } catch {}
 }
 
-async function fireNotification(habit: Habit) {
-  // Try service worker notification first (shows even when minimized)
-  if ("serviceWorker" in navigator) {
-    const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification(`${habit.icon} ${habit.name}`, {
-      body: "Hora de registrar esse hábito! Abra o app e marque como concluído ✅",
-      icon: "/favicon.svg",
-      badge: "/favicon.svg",
-      tag: `reminder-${habit.id}`,
-      renotify: true,
-      requireInteraction: false,
-      data: { url: "/" },
+// Plays an audible beep through the Web Audio API (uses media volume, not ring)
+function playBeep() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    // Three short tones
+    [0, 0.35, 0.7].forEach((startOffset) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.6, ctx.currentTime + startOffset);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startOffset + 0.28);
+      osc.start(ctx.currentTime + startOffset);
+      osc.stop(ctx.currentTime + startOffset + 0.3);
     });
-    return;
+  } catch {
+    // Silently fail if audio isn't available
   }
-  // Fallback: regular Notification API
-  if (Notification.permission === "granted") {
-    new Notification(`${habit.icon} ${habit.name}`, {
-      body: "Hora de registrar esse hábito! Abra o app e marque como concluído ✅",
-      icon: "/favicon.svg",
-      tag: `reminder-${habit.id}`,
-    });
+}
+
+async function fireNotification(habit: Habit) {
+  const title = `${habit.icon} ${habit.name}`;
+  const body = "Hora de marcar esse hábito como concluído! ✅";
+  const icon = "/favicon.svg";
+
+  // 1. Play audio beep (works even when the screen is on and app open)
+  playBeep();
+
+  // 2. Try Service Worker notification (works when minimized)
+  if ("serviceWorker" in navigator) {
+    try {
+      const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("SW timeout")), 3000)
+        ),
+      ]);
+      await (reg as ServiceWorkerRegistration).showNotification(title, {
+        body,
+        icon,
+        badge: icon,
+        tag: `reminder-${habit.id}`,
+        renotify: true,
+        requireInteraction: false,
+        vibrate: [200, 100, 200],
+      });
+      return; // Success via SW
+    } catch {
+      // Fall through to direct Notification
+    }
+  }
+
+  // 3. Fallback: direct Notification API (works in foreground)
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      new Notification(title, { body, icon, tag: `reminder-${habit.id}` });
+    } catch {}
   }
 }
 
 export function useReminders(habits: Habit[]) {
   const checkReminders = useCallback(async () => {
+    if (!("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
+
     const habitsWithReminders = habits.filter((h) => (h as any).reminderTime);
     if (habitsWithReminders.length === 0) return;
 
     const now = new Date();
-    const currentHH = String(now.getHours()).padStart(2, "0");
-    const currentMM = String(now.getMinutes()).padStart(2, "0");
-    const currentTime = `${currentHH}:${currentMM}`;
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const currentTime = `${hh}:${mm}`;
     const fired = getTodayFired();
 
     for (const habit of habitsWithReminders) {
-      const reminderTime = (habit as any).reminderTime as string;
-      if (reminderTime === currentTime && !fired.has(String(habit.id))) {
+      const rt = (habit as any).reminderTime as string;
+      // Match HH:MM — also allow "HH:MM:SS" format from some time inputs
+      const normalized = rt.slice(0, 5);
+      if (normalized === currentTime && !fired.has(String(habit.id))) {
         markFired(habit.id);
         await fireNotification(habit);
       }
@@ -71,11 +112,9 @@ export function useReminders(habits: Habit[]) {
   }, [habits]);
 
   useEffect(() => {
-    // Check immediately on mount (in case we just opened at the right time)
     checkReminders();
-
-    // Then check every 30 seconds for accuracy
-    const interval = setInterval(checkReminders, 30_000);
+    // Check every 20 seconds for precision (won't miss a 1-minute window)
+    const interval = setInterval(checkReminders, 20_000);
     return () => clearInterval(interval);
   }, [checkReminders]);
 }
