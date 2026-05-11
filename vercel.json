@@ -2,7 +2,7 @@
   "buildCommand": "pnpm --filter @workspace/habit-tracker run build",
   "outputDirectory": "artifacts/habit-tracker/dist/public",
   "installCommand": "pnpm install --frozen-lockfile",
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "headers": [
     {
       "source": "/sw.js",
