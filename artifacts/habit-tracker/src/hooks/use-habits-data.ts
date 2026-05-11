@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, subDays } from "date-fns";
 import {
   useListHabits,
   useListCompletions,
@@ -14,10 +14,90 @@ import {
   getListHabitsQueryKey,
   getGetStatsQueryKey,
 } from "@workspace/api-client-react";
+import type {
+  Habit,
+  HabitCompletion,
+  CreateHabitRequest,
+  UpdateHabitRequest,
+  StatsResponse,
+} from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { offlineStore, QueuedOp } from "@/lib/offline-storage";
-import { Habit, HabitCompletion, CreateHabitRequest, UpdateHabitRequest } from "@workspace/api-client-react/src/generated/api.schemas";
+
+// ── Local stats calculator (offline fallback) ────────────────────────────────
+function buildLocalStats(): StatsResponse {
+  const habits = offlineStore.loadHabits();
+  const today = new Date();
+  const todayStr = format(today, "yyyy-MM-dd");
+
+  const last30 = Array.from({ length: 30 }, (_, i) =>
+    format(subDays(today, 29 - i), "yyyy-MM-dd")
+  );
+
+  // Load cached completions for each day
+  const completionsByDate: Record<string, number[]> = {};
+  for (const dateStr of last30) {
+    completionsByDate[dateStr] = offlineStore
+      .loadCompletions(dateStr)
+      .map((c) => c.habitId);
+  }
+
+  const todayIds = completionsByDate[todayStr] ?? [];
+
+  const habitStats = habits.map((habit) => {
+    const weeklyData = last30.map((date) => ({
+      date,
+      completed: (completionsByDate[date] ?? []).includes(habit.id),
+    }));
+    const completedDays = weeklyData.filter((d) => d.completed).length;
+    return {
+      habitId: habit.id,
+      name: habit.name,
+      icon: habit.icon,
+      color: habit.color,
+      streak: habit.streak,
+      longestStreak: habit.streak,
+      totalCompletions: habit.totalCompletions,
+      completionRate: last30.length > 0 ? completedDays / last30.length : 0,
+      weeklyData,
+    };
+  });
+
+  const longestStreakEver = habits.reduce(
+    (max, h) => Math.max(max, h.streak),
+    0
+  );
+
+  // Simple local insights
+  const insights: string[] = [];
+  if (habits.length === 0) {
+    insights.push("Crie seu primeiro hábito para começar a acompanhar seu progresso.");
+  } else {
+    const best = habitStats.sort((a, b) => b.completionRate - a.completionRate)[0];
+    if (best && best.completionRate > 0) {
+      insights.push(
+        `Seu hábito mais consistente é "${best.name}" com ${Math.round(best.completionRate * 100)}% de conclusão nos últimos 30 dias.`
+      );
+    }
+    if (longestStreakEver >= 7) {
+      insights.push(`Incrível! Você manteve uma sequência de ${longestStreakEver} dias. Continue assim!`);
+    }
+    if (todayIds.length === habits.length && habits.length > 0) {
+      insights.push("Parabéns! Você concluiu todos os hábitos de hoje. 🎉");
+    } else if (todayIds.length === 0 && habits.length > 0) {
+      insights.push("Você ainda não marcou nenhum hábito hoje. Vamos lá!");
+    }
+  }
+
+  return {
+    totalHabits: habits.length,
+    completedToday: todayIds.length,
+    longestStreakEver,
+    insights,
+    habitStats,
+  };
+}
 
 // ── Queue flusher ─────────────────────────────────────────────────────────────
 async function flushQueue(
@@ -52,35 +132,20 @@ export function useHabitsData(date: Date = new Date()) {
   const dateStr = format(date, "yyyy-MM-dd");
   const prevOnlineRef = useRef(isOnline);
 
-  // ── Local (offline) state — always initialized from localStorage ──
   const [localHabits, setLocalHabits] = useState<Habit[]>(() => offlineStore.loadHabits());
   const [localCompletions, setLocalCompletions] = useState<HabitCompletion[]>(
     () => offlineStore.loadCompletions(dateStr)
   );
-
-  // Track whether we have fresh server data (API reachable)
   const [apiReachable, setApiReachable] = useState(true);
 
-  // ── Server queries — always enabled, offline fallback on error ──
   const habitsQuery = useListHabits({
-    query: {
-      enabled: isOnline,
-      retry: 1,
-      staleTime: 30_000,
-    },
+    query: { enabled: isOnline, retry: 1 } as any,
   });
   const completionsQuery = useListCompletions(
     { from: dateStr, to: dateStr },
-    {
-      query: {
-        enabled: isOnline,
-        retry: 1,
-        staleTime: 30_000,
-      },
-    }
+    { query: { enabled: isOnline, retry: 1 } as any }
   );
 
-  // ── Persist to localStorage when server responds ──
   useEffect(() => {
     if (habitsQuery.data) {
       offlineStore.saveHabits(habitsQuery.data);
@@ -96,7 +161,6 @@ export function useHabitsData(date: Date = new Date()) {
     }
   }, [completionsQuery.data, dateStr]);
 
-  // ── When API fails (even if technically online), fall back to localStorage ──
   useEffect(() => {
     if (habitsQuery.isError) {
       setApiReachable(false);
@@ -107,29 +171,24 @@ export function useHabitsData(date: Date = new Date()) {
 
   useEffect(() => {
     if (completionsQuery.isError) {
-      const cached = offlineStore.loadCompletions(dateStr);
-      setLocalCompletions(cached);
+      setLocalCompletions(offlineStore.loadCompletions(dateStr));
     }
   }, [completionsQuery.isError, dateStr]);
 
-  // ── Load from localStorage when date changes ──
   useEffect(() => {
     setLocalCompletions(
       completionsQuery.data ?? offlineStore.loadCompletions(dateStr)
     );
   }, [dateStr]);
 
-  // ── Effective online = has network AND API is reachable ──
   const effectivelyOnline = isOnline && apiReachable;
 
-  // ── Invalidate helpers ──
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: getListHabitsQueryKey() });
     queryClient.invalidateQueries({ queryKey: getListCompletionsQueryKey() });
     queryClient.invalidateQueries({ queryKey: getGetStatsQueryKey() });
   }, [queryClient]);
 
-  // ── Raw mutations (used both directly and by queue flusher) ──
   const completeMut = useCompleteHabit({ mutation: { onSuccess: invalidateAll } });
   const uncompleteMut = useUncompleteHabit({ mutation: { onSuccess: invalidateAll } });
   const createMut = useCreateHabit({
@@ -150,7 +209,6 @@ export function useHabitsData(date: Date = new Date()) {
     },
   });
 
-  // ── Async wrappers for flusher ──
   const rawMutations = {
     complete: (id: number, d: string) =>
       new Promise<void>((res, rej) =>
@@ -174,10 +232,8 @@ export function useHabitsData(date: Date = new Date()) {
       ),
   };
 
-  // ── Flush pending queue when coming back online ──
   useEffect(() => {
     if (isOnline && !prevOnlineRef.current) {
-      // Re-check API reachability when network comes back
       setApiReachable(true);
       const queue = offlineStore.getQueue();
       if (queue.length > 0) {
@@ -194,86 +250,42 @@ export function useHabitsData(date: Date = new Date()) {
     prevOnlineRef.current = isOnline;
   }, [isOnline]);
 
-  // ── Public toggle (offline-aware) ──
   const toggleCompletion = useCallback(
     (habitId: number, isCompleted: boolean) => {
+      const applyLocally = () => {
+        if (isCompleted) {
+          offlineStore.removeCompletionLocally(dateStr, habitId);
+          offlineStore.enqueue({ type: "uncomplete", habitId, date: dateStr } as any);
+        } else {
+          offlineStore.addCompletionLocally(dateStr, habitId);
+          offlineStore.enqueue({ type: "complete", habitId, date: dateStr } as any);
+        }
+        setLocalCompletions(offlineStore.loadCompletions(dateStr));
+        setLocalHabits(offlineStore.loadHabits());
+      };
+
       if (effectivelyOnline) {
         if (isCompleted) {
           uncompleteMut.mutate(
             { id: habitId, data: { date: dateStr } },
-            {
-              onError: () => {
-                // API failed mid-session — fall back to local
-                setApiReachable(false);
-                if (isCompleted) {
-                  offlineStore.removeCompletionLocally(dateStr, habitId);
-                  offlineStore.enqueue({ type: "uncomplete", habitId, date: dateStr });
-                } else {
-                  offlineStore.addCompletionLocally(dateStr, habitId);
-                  offlineStore.enqueue({ type: "complete", habitId, date: dateStr });
-                }
-                setLocalCompletions(offlineStore.loadCompletions(dateStr));
-              },
-            }
+            { onError: () => { setApiReachable(false); applyLocally(); } }
           );
         } else {
           completeMut.mutate(
             { id: habitId, data: { date: dateStr } },
-            {
-              onError: () => {
-                setApiReachable(false);
-                offlineStore.addCompletionLocally(dateStr, habitId);
-                offlineStore.enqueue({ type: "complete", habitId, date: dateStr });
-                setLocalCompletions(offlineStore.loadCompletions(dateStr));
-                setLocalHabits(offlineStore.loadHabits());
-              },
-            }
+            { onError: () => { setApiReachable(false); applyLocally(); } }
           );
         }
       } else {
-        // Offline or API unreachable — apply locally + enqueue
-        if (isCompleted) {
-          offlineStore.removeCompletionLocally(dateStr, habitId);
-          offlineStore.enqueue({ type: "uncomplete", habitId, date: dateStr });
-        } else {
-          offlineStore.addCompletionLocally(dateStr, habitId);
-          offlineStore.enqueue({ type: "complete", habitId, date: dateStr });
-        }
-        setLocalCompletions(offlineStore.loadCompletions(dateStr));
-        setLocalHabits(offlineStore.loadHabits());
+        applyLocally();
       }
     },
     [effectivelyOnline, dateStr]
   );
 
-  // ── Public createHabit (offline-aware) ──
   const createHabit = useCallback(
     (payload: CreateHabitRequest) => {
-      if (effectivelyOnline) {
-        createMut.mutate(
-          { data: payload },
-          {
-            onError: () => {
-              setApiReachable(false);
-              const tempHabit: Habit = {
-                id: -Date.now(),
-                name: payload.name,
-                icon: payload.icon ?? "💧",
-                color: payload.color ?? "Indigo",
-                frequency: payload.frequency ?? "daily",
-                targetCount: payload.targetCount ?? 1,
-                streak: 0,
-                totalCompletions: 0,
-                createdAt: new Date().toISOString(),
-              };
-              offlineStore.addHabitLocally(tempHabit);
-              offlineStore.enqueue({ type: "create", payload });
-              setLocalHabits(offlineStore.loadHabits());
-              toast({ title: "Hábito salvo localmente", description: "Vai sincronizar quando a API estiver acessível." });
-            },
-          }
-        );
-      } else {
+      const applyLocally = () => {
         const tempHabit: Habit = {
           id: -Date.now(),
           name: payload.name,
@@ -282,19 +294,28 @@ export function useHabitsData(date: Date = new Date()) {
           frequency: payload.frequency ?? "daily",
           targetCount: payload.targetCount ?? 1,
           streak: 0,
+          longestStreak: 0,
           totalCompletions: 0,
           createdAt: new Date().toISOString(),
         };
         offlineStore.addHabitLocally(tempHabit);
-        offlineStore.enqueue({ type: "create", payload });
+        offlineStore.enqueue({ type: "create", payload } as any);
         setLocalHabits(offlineStore.loadHabits());
         toast({ title: "Hábito salvo localmente", description: "Vai sincronizar quando voltar a internet." });
+      };
+
+      if (effectivelyOnline) {
+        createMut.mutate(
+          { data: payload },
+          { onError: () => { setApiReachable(false); applyLocally(); } }
+        );
+      } else {
+        applyLocally();
       }
     },
     [effectivelyOnline]
   );
 
-  // ── Public deleteHabit (offline-aware) ──
   const deleteHabit = useCallback(
     ({ id }: { id: number }) => {
       if (effectivelyOnline) {
@@ -304,14 +325,14 @@ export function useHabitsData(date: Date = new Date()) {
             onError: () => {
               setApiReachable(false);
               offlineStore.removeHabitLocally(id);
-              offlineStore.enqueue({ type: "delete", habitId: id });
+              offlineStore.enqueue({ type: "delete", habitId: id } as any);
               setLocalHabits(offlineStore.loadHabits());
             },
           }
         );
       } else {
         offlineStore.removeHabitLocally(id);
-        offlineStore.enqueue({ type: "delete", habitId: id });
+        offlineStore.enqueue({ type: "delete", habitId: id } as any);
         setLocalHabits(offlineStore.loadHabits());
         toast({ title: "Hábito removido localmente" });
       }
@@ -319,7 +340,6 @@ export function useHabitsData(date: Date = new Date()) {
     [effectivelyOnline]
   );
 
-  // ── Public updateHabit (offline-aware) ──
   const updateHabit = useCallback(
     ({ id, data }: { id: number; data: UpdateHabitRequest }) => {
       if (effectivelyOnline) {
@@ -329,14 +349,14 @@ export function useHabitsData(date: Date = new Date()) {
             onError: () => {
               setApiReachable(false);
               offlineStore.updateHabitLocally(id, data as Partial<Habit>);
-              offlineStore.enqueue({ type: "update", habitId: id, payload: data });
+              offlineStore.enqueue({ type: "update", habitId: id, payload: data } as any);
               setLocalHabits(offlineStore.loadHabits());
             },
           }
         );
       } else {
         offlineStore.updateHabitLocally(id, data as Partial<Habit>);
-        offlineStore.enqueue({ type: "update", habitId: id, payload: data });
+        offlineStore.enqueue({ type: "update", habitId: id, payload: data } as any);
         setLocalHabits(offlineStore.loadHabits());
         toast({ title: "Hábito atualizado localmente" });
       }
@@ -344,12 +364,11 @@ export function useHabitsData(date: Date = new Date()) {
     [effectivelyOnline]
   );
 
-  // ── Derived values ──
-  const completedHabitIds = new Set(localCompletions.map(c => c.habitId));
-
-  const isLoading = isOnline && apiReachable
-    ? habitsQuery.isLoading && localHabits.length === 0
-    : false;
+  const completedHabitIds = new Set(localCompletions.map((c) => c.habitId));
+  const isLoading =
+    isOnline && apiReachable
+      ? habitsQuery.isLoading && localHabits.length === 0
+      : false;
 
   return {
     habits: localHabits,
@@ -365,6 +384,28 @@ export function useHabitsData(date: Date = new Date()) {
   };
 }
 
+// ── Stats hook — API com fallback local ──────────────────────────────────────
 export function useHabitStats() {
-  return useGetStats();
+  const statsQuery = useGetStats();
+  const [localStats, setLocalStats] = useState<StatsResponse | null>(null);
+
+  // Quando a API falha, calcula localmente
+  useEffect(() => {
+    if (statsQuery.isError || (!statsQuery.isLoading && !statsQuery.data)) {
+      setLocalStats(buildLocalStats());
+    }
+  }, [statsQuery.isError, statsQuery.isLoading, statsQuery.data]);
+
+  // Atualiza stats locais quando hábitos mudam no localStorage
+  useEffect(() => {
+    if (!statsQuery.data) {
+      setLocalStats(buildLocalStats());
+    }
+  }, []);
+
+  return {
+    ...statsQuery,
+    data: statsQuery.data ?? localStats ?? undefined,
+    isLoading: statsQuery.isLoading && !localStats,
+  };
 }
