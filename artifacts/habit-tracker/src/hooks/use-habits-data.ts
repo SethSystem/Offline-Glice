@@ -52,17 +52,32 @@ export function useHabitsData(date: Date = new Date()) {
   const dateStr = format(date, "yyyy-MM-dd");
   const prevOnlineRef = useRef(isOnline);
 
-  // ── Local (offline) state ──
+  // ── Local (offline) state — always initialized from localStorage ──
   const [localHabits, setLocalHabits] = useState<Habit[]>(() => offlineStore.loadHabits());
   const [localCompletions, setLocalCompletions] = useState<HabitCompletion[]>(
     () => offlineStore.loadCompletions(dateStr)
   );
 
-  // ── Server queries ──
-  const habitsQuery = useListHabits({ query: { enabled: isOnline, retry: 1 } });
+  // Track whether we have fresh server data (API reachable)
+  const [apiReachable, setApiReachable] = useState(true);
+
+  // ── Server queries — always enabled, offline fallback on error ──
+  const habitsQuery = useListHabits({
+    query: {
+      enabled: isOnline,
+      retry: 1,
+      staleTime: 30_000,
+    },
+  });
   const completionsQuery = useListCompletions(
     { from: dateStr, to: dateStr },
-    { query: { enabled: isOnline, retry: 1 } }
+    {
+      query: {
+        enabled: isOnline,
+        retry: 1,
+        staleTime: 30_000,
+      },
+    }
   );
 
   // ── Persist to localStorage when server responds ──
@@ -70,6 +85,7 @@ export function useHabitsData(date: Date = new Date()) {
     if (habitsQuery.data) {
       offlineStore.saveHabits(habitsQuery.data);
       setLocalHabits(habitsQuery.data);
+      setApiReachable(true);
     }
   }, [habitsQuery.data]);
 
@@ -80,12 +96,31 @@ export function useHabitsData(date: Date = new Date()) {
     }
   }, [completionsQuery.data, dateStr]);
 
+  // ── When API fails (even if technically online), fall back to localStorage ──
+  useEffect(() => {
+    if (habitsQuery.isError) {
+      setApiReachable(false);
+      const cached = offlineStore.loadHabits();
+      if (cached.length > 0) setLocalHabits(cached);
+    }
+  }, [habitsQuery.isError]);
+
+  useEffect(() => {
+    if (completionsQuery.isError) {
+      const cached = offlineStore.loadCompletions(dateStr);
+      setLocalCompletions(cached);
+    }
+  }, [completionsQuery.isError, dateStr]);
+
   // ── Load from localStorage when date changes ──
   useEffect(() => {
     setLocalCompletions(
       completionsQuery.data ?? offlineStore.loadCompletions(dateStr)
     );
   }, [dateStr]);
+
+  // ── Effective online = has network AND API is reachable ──
+  const effectivelyOnline = isOnline && apiReachable;
 
   // ── Invalidate helpers ──
   const invalidateAll = useCallback(() => {
@@ -142,6 +177,8 @@ export function useHabitsData(date: Date = new Date()) {
   // ── Flush pending queue when coming back online ──
   useEffect(() => {
     if (isOnline && !prevOnlineRef.current) {
+      // Re-check API reachability when network comes back
+      setApiReachable(true);
       const queue = offlineStore.getQueue();
       if (queue.length > 0) {
         toast({ title: "Sincronizando...", description: `${queue.length} ação(ões) pendente(s).` });
@@ -160,14 +197,41 @@ export function useHabitsData(date: Date = new Date()) {
   // ── Public toggle (offline-aware) ──
   const toggleCompletion = useCallback(
     (habitId: number, isCompleted: boolean) => {
-      if (isOnline) {
+      if (effectivelyOnline) {
         if (isCompleted) {
-          uncompleteMut.mutate({ id: habitId, data: { date: dateStr } });
+          uncompleteMut.mutate(
+            { id: habitId, data: { date: dateStr } },
+            {
+              onError: () => {
+                // API failed mid-session — fall back to local
+                setApiReachable(false);
+                if (isCompleted) {
+                  offlineStore.removeCompletionLocally(dateStr, habitId);
+                  offlineStore.enqueue({ type: "uncomplete", habitId, date: dateStr });
+                } else {
+                  offlineStore.addCompletionLocally(dateStr, habitId);
+                  offlineStore.enqueue({ type: "complete", habitId, date: dateStr });
+                }
+                setLocalCompletions(offlineStore.loadCompletions(dateStr));
+              },
+            }
+          );
         } else {
-          completeMut.mutate({ id: habitId, data: { date: dateStr } });
+          completeMut.mutate(
+            { id: habitId, data: { date: dateStr } },
+            {
+              onError: () => {
+                setApiReachable(false);
+                offlineStore.addCompletionLocally(dateStr, habitId);
+                offlineStore.enqueue({ type: "complete", habitId, date: dateStr });
+                setLocalCompletions(offlineStore.loadCompletions(dateStr));
+                setLocalHabits(offlineStore.loadHabits());
+              },
+            }
+          );
         }
       } else {
-        // Apply locally + enqueue
+        // Offline or API unreachable — apply locally + enqueue
         if (isCompleted) {
           offlineStore.removeCompletionLocally(dateStr, habitId);
           offlineStore.enqueue({ type: "uncomplete", habitId, date: dateStr });
@@ -179,16 +243,37 @@ export function useHabitsData(date: Date = new Date()) {
         setLocalHabits(offlineStore.loadHabits());
       }
     },
-    [isOnline, dateStr]
+    [effectivelyOnline, dateStr]
   );
 
   // ── Public createHabit (offline-aware) ──
   const createHabit = useCallback(
     (payload: CreateHabitRequest) => {
-      if (isOnline) {
-        createMut.mutate({ data: payload });
+      if (effectivelyOnline) {
+        createMut.mutate(
+          { data: payload },
+          {
+            onError: () => {
+              setApiReachable(false);
+              const tempHabit: Habit = {
+                id: -Date.now(),
+                name: payload.name,
+                icon: payload.icon ?? "💧",
+                color: payload.color ?? "Indigo",
+                frequency: payload.frequency ?? "daily",
+                targetCount: payload.targetCount ?? 1,
+                streak: 0,
+                totalCompletions: 0,
+                createdAt: new Date().toISOString(),
+              };
+              offlineStore.addHabitLocally(tempHabit);
+              offlineStore.enqueue({ type: "create", payload });
+              setLocalHabits(offlineStore.loadHabits());
+              toast({ title: "Hábito salvo localmente", description: "Vai sincronizar quando a API estiver acessível." });
+            },
+          }
+        );
       } else {
-        // Add locally with temp ID
         const tempHabit: Habit = {
           id: -Date.now(),
           name: payload.name,
@@ -206,14 +291,24 @@ export function useHabitsData(date: Date = new Date()) {
         toast({ title: "Hábito salvo localmente", description: "Vai sincronizar quando voltar a internet." });
       }
     },
-    [isOnline]
+    [effectivelyOnline]
   );
 
   // ── Public deleteHabit (offline-aware) ──
   const deleteHabit = useCallback(
     ({ id }: { id: number }) => {
-      if (isOnline) {
-        deleteMut.mutate({ id });
+      if (effectivelyOnline) {
+        deleteMut.mutate(
+          { id },
+          {
+            onError: () => {
+              setApiReachable(false);
+              offlineStore.removeHabitLocally(id);
+              offlineStore.enqueue({ type: "delete", habitId: id });
+              setLocalHabits(offlineStore.loadHabits());
+            },
+          }
+        );
       } else {
         offlineStore.removeHabitLocally(id);
         offlineStore.enqueue({ type: "delete", habitId: id });
@@ -221,14 +316,24 @@ export function useHabitsData(date: Date = new Date()) {
         toast({ title: "Hábito removido localmente" });
       }
     },
-    [isOnline]
+    [effectivelyOnline]
   );
 
   // ── Public updateHabit (offline-aware) ──
   const updateHabit = useCallback(
     ({ id, data }: { id: number; data: UpdateHabitRequest }) => {
-      if (isOnline) {
-        updateMut.mutate({ id, data });
+      if (effectivelyOnline) {
+        updateMut.mutate(
+          { id, data },
+          {
+            onError: () => {
+              setApiReachable(false);
+              offlineStore.updateHabitLocally(id, data as Partial<Habit>);
+              offlineStore.enqueue({ type: "update", habitId: id, payload: data });
+              setLocalHabits(offlineStore.loadHabits());
+            },
+          }
+        );
       } else {
         offlineStore.updateHabitLocally(id, data as Partial<Habit>);
         offlineStore.enqueue({ type: "update", habitId: id, payload: data });
@@ -236,20 +341,20 @@ export function useHabitsData(date: Date = new Date()) {
         toast({ title: "Hábito atualizado localmente" });
       }
     },
-    [isOnline]
+    [effectivelyOnline]
   );
 
   // ── Derived values ──
   const completedHabitIds = new Set(localCompletions.map(c => c.habitId));
 
-  const isLoading = isOnline
-    ? habitsQuery.isLoading || completionsQuery.isLoading
+  const isLoading = isOnline && apiReachable
+    ? habitsQuery.isLoading && localHabits.length === 0
     : false;
 
   return {
     habits: localHabits,
     isLoading,
-    isOnline,
+    isOnline: effectivelyOnline,
     completedHabitIds,
     toggleCompletion,
     createHabit,
