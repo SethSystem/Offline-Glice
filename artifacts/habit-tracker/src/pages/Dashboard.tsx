@@ -8,7 +8,7 @@ import { HabitCard } from "@/components/HabitCard";
 import { HabitFormDialog } from "@/components/HabitFormDialog";
 import { useHabitsData } from "@/hooks/use-habits-data";
 import { useReminders, requestNotificationPermission } from "@/hooks/use-reminders";
-import { Habit } from "@workspace/api-client-react/src/generated/api.schemas";
+import type { Habit } from "@/lib/types";
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -30,15 +30,15 @@ export default function Dashboard() {
       setDeferredPrompt(e);
       setShowInstallBanner(true);
     };
-    window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
   const handleInstall = async () => {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
+      if (outcome === "accepted") {
         setShowInstallBanner(false);
         setDeferredPrompt(null);
       }
@@ -47,29 +47,35 @@ export default function Dashboard() {
 
   const {
     habits,
-    isLoading,
     completedHabitIds,
     toggleCompletion,
     createHabit,
     updateHabit,
     deleteHabit,
-    isCreating,
-    isUpdating,
   } = useHabitsData(currentDate);
 
   useReminders(habits);
 
-  const formattedDate = format(currentDate, "EEEE, d 'de' MMMM", { locale: ptBR });
-  const capitalizedDate = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
-  const progress = habits.length > 0
-    ? Math.round((completedHabitIds.size / habits.length) * 100)
-    : 0;
+  const formattedDate = format(currentDate, "EEEE, d 'de' MMMM", {
+    locale: ptBR,
+  });
+  const capitalizedDate =
+    formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+  const progress =
+    habits.length > 0
+      ? Math.round((completedHabitIds.size / habits.length) * 100)
+      : 0;
 
-  const handleOpenEdit = (habit: Habit) => { setEditingHabit(habit); setIsDialogOpen(true); };
-  const handleOpenCreate = () => { setEditingHabit(null); setIsDialogOpen(true); };
+  const handleOpenEdit = (habit: Habit) => {
+    setEditingHabit(habit);
+    setIsDialogOpen(true);
+  };
+  const handleOpenCreate = () => {
+    setEditingHabit(null);
+    setIsDialogOpen(true);
+  };
   const handleSubmit = async (data: any) => {
     setIsDialogOpen(false);
-    // If a reminder was set, ask for notification permission
     if (data.reminderTime) {
       await requestNotificationPermission();
     }
@@ -84,7 +90,6 @@ export default function Dashboard() {
     <AppLayout>
       <div className="px-5 py-7 md:p-10 max-w-3xl w-full mx-auto">
 
-        {/* PWA Install Banner */}
         {showInstallBanner && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -96,8 +101,12 @@ export default function Dashboard() {
               <Download size={16} className="text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground">Instalar HabitFlow</p>
-              <p className="text-xs text-muted-foreground">Use como app — funciona offline</p>
+              <p className="text-sm font-semibold text-foreground">
+                Instalar HabitFlow
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Use como app — funciona offline
+              </p>
             </div>
             <button
               onClick={handleInstall}
@@ -114,7 +123,6 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* Header */}
         <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-5">
           <div>
             <p className="text-primary font-semibold text-xs tracking-widest uppercase mb-1">
@@ -127,17 +135,20 @@ export default function Dashboard() {
               {habits.length === 0
                 ? "Comece criando seu primeiro hábito."
                 : completedHabitIds.size === habits.length
-                  ? "Todos os hábitos concluídos hoje."
-                  : `${completedHabitIds.size} de ${habits.length} hábitos concluídos.`
-              }
+                ? "Todos os hábitos concluídos hoje."
+                : `${completedHabitIds.size} de ${habits.length} hábitos concluídos.`}
             </p>
           </div>
 
           {habits.length > 0 && (
             <div className="bg-card border border-border p-4 rounded-2xl shrink-0 w-full md:w-44">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-medium text-muted-foreground">Hoje</span>
-                <span className="text-sm font-bold text-primary">{progress}%</span>
+                <span className="text-xs font-medium text-muted-foreground">
+                  Hoje
+                </span>
+                <span className="text-sm font-bold text-primary">
+                  {progress}%
+                </span>
               </div>
               <div className="h-2 bg-secondary rounded-full overflow-hidden">
                 <motion.div
@@ -151,14 +162,7 @@ export default function Dashboard() {
           )}
         </header>
 
-        {/* Content */}
-        {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-20 bg-card rounded-2xl animate-pulse" />
-            ))}
-          </div>
-        ) : habits.length === 0 ? (
+        {habits.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <img
               src={`${import.meta.env.BASE_URL}images/empty-state.png`}
@@ -167,7 +171,8 @@ export default function Dashboard() {
             />
             <h2 className="text-xl font-bold mb-2">Nenhum hábito ainda</h2>
             <p className="text-muted-foreground mb-7 max-w-xs text-sm leading-relaxed">
-              Pequenas mudanças diárias constroem grandes resultados. Crie seu primeiro hábito agora.
+              Pequenas mudanças diárias constroem grandes resultados. Crie seu
+              primeiro hábito agora.
             </p>
             <button
               onClick={handleOpenCreate}
@@ -183,7 +188,12 @@ export default function Dashboard() {
                 key={habit.id}
                 habit={habit}
                 isCompleted={completedHabitIds.has(habit.id)}
-                onToggle={() => toggleCompletion(habit.id, completedHabitIds.has(habit.id))}
+                onToggle={() =>
+                  toggleCompletion(
+                    habit.id,
+                    completedHabitIds.has(habit.id)
+                  )
+                }
                 onEdit={() => handleOpenEdit(habit)}
                 onDelete={() => deleteHabit({ id: habit.id })}
               />
@@ -203,7 +213,7 @@ export default function Dashboard() {
           onClose={() => setIsDialogOpen(false)}
           onSubmit={handleSubmit}
           initialData={editingHabit}
-          isLoading={isCreating || isUpdating}
+          isLoading={false}
         />
       </div>
     </AppLayout>
